@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
@@ -622,6 +622,11 @@ function viewAdmin(){
     <button class="mitem" id="import-btn"><span class="ic"><i class="ti ti-file-spreadsheet"></i></span>Excel importieren<i class="ti ti-chevron-right chev"></i></button>
     <button class="mitem" id="export-btn"><span class="ic"><i class="ti ti-download"></i></span>CSV exportieren<i class="ti ti-chevron-right chev"></i></button>
   </div>
+  <div class="sect-label">Backup</div>
+  <div class="mlist">
+    <button class="mitem" id="backup-btn"><span class="ic"><i class="ti ti-cloud-upload"></i></span>Backup sichern<i class="ti ti-chevron-right chev"></i></button>
+    <button class="mitem" id="restore-btn"><span class="ic"><i class="ti ti-cloud-download"></i></span>Backup einspielen<i class="ti ti-chevron-right chev"></i></button>
+  </div>
   <div class="sect-label">Urlaub &amp; Abwesenheit</div>
   <div class="mlist">
     <button class="mitem" id="vac-setup"><span class="ic"><i class="ti ti-beach"></i></span>Urlaubskonto<span class="rgt">${vacTxt}</span></button>
@@ -632,7 +637,8 @@ function viewAdmin(){
     <button class="mitem" id="rules-btn"><span class="ic"><i class="ti ti-adjustments"></i></span>Soll &amp; Pause<i class="ti ti-chevron-right chev"></i></button>
     <button class="mitem" id="about-btn"><span class="ic"><i class="ti ti-info-circle"></i></span>Über die App<i class="ti ti-chevron-right chev"></i></button>
   </div>
-  <input type="file" id="file-input" accept=".xlsx,.xls" class="hidden">`;
+  <input type="file" id="file-input" accept=".xlsx,.xls" class="hidden">
+  <input type="file" id="backup-input" accept=".json,application/json" class="hidden">`;
 }
 
 /* ============================================================
@@ -843,7 +849,10 @@ function openAboutModal(){
 function bindAdmin(){
   document.getElementById('import-btn').onclick=()=>document.getElementById('file-input').click();
   document.getElementById('file-input').onchange=handleImport;
-  document.getElementById('export-btn').onclick=exportCSV;
+  document.getElementById('export-btn').onclick=openExportModal;
+  document.getElementById('backup-btn').onclick=exportBackup;
+  document.getElementById('restore-btn').onclick=()=>document.getElementById('backup-input').click();
+  document.getElementById('backup-input').onchange=handleBackupRestore;
   document.getElementById('vac-setup').onclick=openVacModal;
   document.getElementById('holidays-btn').onclick=openHolidaysModal;
   document.getElementById('rules-btn').onclick=openRulesModal;
@@ -865,15 +874,23 @@ function handleImport(ev){
     try{
       const data=new Uint8Array(e.target.result);
       const wb=XLSX.read(data,{type:'array'});
-      let added=0, skipped=0;
+      let added=0, skipped=0, replaced=0, wasTimeSheet=false;
       wb.SheetNames.forEach(sn=>{
         const ws=wb.Sheets[sn];
         const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
-        const result = isDayTypeSheet(rows) ? importDayTypeRows(rows) : importTimeRows(rows);
-        added+=result.added; skipped+=result.skipped;
+        const isDT=isDayTypeSheet(rows);
+        const result = isDT ? importDayTypeRows(rows) : importTimeRows(rows);
+        if(!isDT) wasTimeSheet=true;
+        added+=result.added; skipped+=result.skipped; replaced+=(result.replaced||0);
       });
       save(); render();
-      toast(`Import: ${added} neu, ${skipped} übersprungen`);
+      if(wasTimeSheet){
+        toast(replaced>0
+          ? `${added} Einträge importiert, ${replaced} ersetzt`
+          : `${added} Einträge importiert`);
+      } else {
+        toast(`Import: ${added} neu, ${skipped} übersprungen`);
+      }
     }catch(err){ console.error(err); toast('Import fehlgeschlagen'); }
     ev.target.value='';
   };
@@ -910,7 +927,8 @@ function importDayTypeRows(rows){
   return {added,skipped};
 }
 function importTimeRows(rows){
-  let added=0, skipped=0;
+  // Sammelt zuerst alle gültigen Zeilen, um den Zeitraum der Datei zu bestimmen.
+  const parsed=[];
   rows.forEach(r=>{
     const dateCell=r[2];
     if(!dateCell || !/^\d{2}\.\d{2}\.\d{4}$/.test(String(dateCell).trim())) return;
@@ -922,14 +940,34 @@ function importTimeRows(rows){
     const wp=WP_TYPES[wpRaw]?wpRaw:(wpRaw||'');
     const info=String(r[10]||'').trim().replace(/\\n/g,' ').trim();
     if(!from||!to) return;
-    if(!DB.entries[di]) DB.entries[di]=[];
-    const dup=DB.entries[di].some(x=>x.from===from&&x.to===to&&x.order===order);
-    if(dup){ skipped++; return; }
-    DB.entries[di].push({id:uid(),from,to,order,wp,info});
-    DB.entries[di].sort((a,b)=>a.from.localeCompare(b.from));
+    parsed.push({di,from,to,order,wp,info});
+  });
+  if(!parsed.length) return {added:0, skipped:0, replaced:0, range:null};
+
+  // Zeitraum der Datei = frühestes bis spätestes Datum
+  const dates=parsed.map(p=>p.di).sort();
+  const rangeFrom=dates[0], rangeTo=dates[dates.length-1];
+
+  // Alle vorhandenen Zeiteinträge in diesem Zeitraum entfernen (Firmensystem gewinnt).
+  // Tagestypen (Urlaub/ZA/Krank) bleiben unangetastet, die stehen im Export nicht drin.
+  let replaced=0;
+  Object.keys(DB.entries).forEach(di=>{
+    if(di>=rangeFrom && di<=rangeTo){
+      replaced += (DB.entries[di]||[]).length;
+      delete DB.entries[di];
+    }
+  });
+
+  let added=0;
+  parsed.forEach(p=>{
+    if(!DB.entries[p.di]) DB.entries[p.di]=[];
+    DB.entries[p.di].push({id:uid(),from:p.from,to:p.to,order:p.order,wp:p.wp,info:p.info});
     added++;
   });
-  return {added,skipped};
+  Object.keys(DB.entries).forEach(di=>{
+    if(di>=rangeFrom && di<=rangeTo) DB.entries[di].sort((a,b)=>a.from.localeCompare(b.from));
+  });
+  return {added, skipped:0, replaced, range:{from:rangeFrom,to:rangeTo}};
 }
 function normTime(v){
   if(v==null) return '';
@@ -947,9 +985,12 @@ function normTime(v){
 /* ============================================================
    CSV EXPORT
    ============================================================ */
-function exportCSV(){
+function exportCSV(fromISO, toISO){
   const rows=[['Datum','Wochentag','Von','Bis','Netto (h)','Arbeitsort','Projekt','Info','Tagestyp']];
-  const dates=allDatesWithData().sort();
+  let dates=allDatesWithData().sort();
+  if(fromISO) dates=dates.filter(d=>d>=fromISO);
+  if(toISO) dates=dates.filter(d=>d<=toISO);
+  if(!dates.length){ toast('Keine Daten im Zeitraum'); return; }
   dates.forEach(di=>{
     const d=parseISO(di); const dow=DOW_DE[(d.getDay()+6)%7];
     const dt=DB.dayType[di];
@@ -971,10 +1012,133 @@ function exportCSV(){
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url; a.download=`zeiterfassung_${todayISO()}.csv`;
+  const nameSuffix = fromISO ? `${fromISO}_bis_${toISO}` : todayISO();
+  a.href=url; a.download=`zeiterfassung_${nameSuffix}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
   toast('CSV exportiert');
+}
+
+/* ============================================================
+   BACKUP: vollständige Sicherung (Zeiten + Tagestypen + Einstellungen)
+   Über das iOS-Teilen-Menü in iCloud Drive ablegbar.
+   ============================================================ */
+function exportBackup(){
+  const payload = {
+    app:'zeiterfassung',
+    version:APP_VERSION,
+    exportedAt:new Date().toISOString(),
+    data:{ entries:DB.entries, dayType:DB.dayType, settings:DB.settings }
+  };
+  const json=JSON.stringify(payload,null,2);
+  const fname=`zeiterfassung-backup_${todayISO()}.json`;
+  const blob=new Blob([json],{type:'application/json'});
+  const file=(typeof File!=='undefined') ? new File([blob],fname,{type:'application/json'}) : null;
+
+  // Auf iOS: Teilen-Menü öffnen, damit "In Dateien sichern" -> iCloud Drive möglich ist
+  if(file && navigator.canShare && navigator.canShare({files:[file]})){
+    navigator.share({files:[file], title:'Zeiterfassung Backup'})
+      .then(()=>toast('Backup geteilt'))
+      .catch(()=>downloadBlob(blob,fname));
+    return;
+  }
+  downloadBlob(blob,fname);
+}
+function downloadBlob(blob,fname){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('Backup gespeichert');
+}
+function handleBackupRestore(ev){
+  const file=ev.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try{
+      const obj=JSON.parse(e.target.result);
+      const d = obj && obj.data ? obj.data : null;
+      if(!d || typeof d!=='object' || !('entries' in d) || !('dayType' in d)){
+        toast('Keine gültige Backup-Datei'); ev.target.value=''; return;
+      }
+      const nEntries=Object.values(d.entries||{}).reduce((s,a)=>s+(a?a.length:0),0);
+      const nTypes=Object.keys(d.dayType||{}).length;
+      openModal(`
+        <h2>Backup einspielen<button class="x" data-close>&times;</button></h2>
+        <div class="card" style="line-height:1.7; font-size:15px;">
+          Aus dieser Datei:<br>
+          <b>${nEntries}</b> Zeiteinträge<br>
+          <b>${nTypes}</b> Urlaubs-/ZA-/Kranktage<br>
+          <span style="color:var(--text3); font-size:13px;">Gesichert am ${obj.exportedAt?obj.exportedAt.slice(0,10):'unbekannt'}</span>
+        </div>
+        <p style="font-size:13px; color:var(--minus); margin:12px 2px 14px; line-height:1.5;">
+          Achtung: Alle aktuellen Daten in der App werden dabei ersetzt.</p>
+        <button class="primary" id="br-go">Jetzt ersetzen</button>
+        <button class="ghost" data-close>Abbrechen</button>
+      `);
+      document.getElementById('br-go').onclick=()=>{
+        DB.entries=d.entries||{};
+        DB.dayType=d.dayType||{};
+        if(d.settings) DB.settings=Object.assign({}, DB.settings, d.settings);
+        save(); closeModal(); render();
+        toast('Backup eingespielt');
+      };
+    }catch(err){ console.error(err); toast('Backup konnte nicht gelesen werden'); }
+    ev.target.value='';
+  };
+  reader.readAsText(file);
+}
+
+/* ---------- Export-Dialog: Zeitraum wählen ---------- */
+function openExportModal(){
+  const now=new Date();
+  const monthsAvail=[...new Set(allDatesWithData().map(d=>d.slice(0,7)))].sort().reverse();
+  const monthOpts = monthsAvail.map(m=>{
+    const [y,mo]=m.split('-');
+    return `<option value="${m}">${MON_DE[Number(mo)-1]} ${y}</option>`;
+  }).join('');
+  openModal(`
+    <h2>CSV exportieren<button class="x" data-close>&times;</button></h2>
+    <div class="field">
+      <label>Zeitraum</label>
+      <select id="ex-mode">
+        <option value="month">Einzelner Monat</option>
+        <option value="year">Ganzes Jahr</option>
+        <option value="all">Alles</option>
+      </select>
+    </div>
+    <div class="field" id="ex-month-wrap">
+      <label>Monat</label>
+      <select id="ex-month">${monthOpts||'<option value="">keine Daten</option>'}</select>
+    </div>
+    <div class="field hidden" id="ex-year-wrap">
+      <label>Jahr</label>
+      <select id="ex-year">${[...new Set(monthsAvail.map(m=>m.slice(0,4)))].map(y=>`<option value="${y}">${y}</option>`).join('')||'<option value="">keine Daten</option>'}</select>
+    </div>
+    <button class="primary" id="ex-go">Exportieren</button>
+  `);
+  const mode=document.getElementById('ex-mode');
+  const mw=document.getElementById('ex-month-wrap'), yw=document.getElementById('ex-year-wrap');
+  mode.onchange=()=>{
+    mw.classList.toggle('hidden', mode.value!=='month');
+    yw.classList.toggle('hidden', mode.value!=='year');
+  };
+  document.getElementById('ex-go').onclick=()=>{
+    const m=mode.value;
+    if(m==='all'){ closeModal(); exportCSV(); return; }
+    if(m==='month'){
+      const val=document.getElementById('ex-month').value;
+      if(!val){ toast('Kein Monat verfügbar'); return; }
+      const [y,mo]=val.split('-').map(Number);
+      const from=`${y}-${pad(mo)}-01`;
+      const to=iso(new Date(y,mo,0));
+      closeModal(); exportCSV(from,to); return;
+    }
+    const y=document.getElementById('ex-year').value;
+    if(!y){ toast('Kein Jahr verfügbar'); return; }
+    closeModal(); exportCSV(`${y}-01-01`,`${y}-12-31`);
+  };
 }
 
 /* ============================================================
