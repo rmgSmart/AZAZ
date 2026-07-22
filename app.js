@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
