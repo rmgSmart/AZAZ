@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
@@ -60,6 +60,16 @@ function parseISO(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,
 function todayISO(){ return iso(new Date()); }
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 function isWeekend(d){ const w=d.getDay(); return w===0||w===6; }
+function isoWeekNumber(d){
+  // ISO 8601: Woche 1 ist die Woche mit dem ersten Donnerstag des Jahres
+  const t=new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day=(t.getDay()+6)%7;        // Mo=0 .. So=6
+  t.setDate(t.getDate()-day+3);      // Donnerstag dieser Woche
+  const firstThu=new Date(t.getFullYear(),0,4);
+  const fday=(firstThu.getDay()+6)%7;
+  firstThu.setDate(firstThu.getDate()-fday+3);
+  return 1+Math.round((t-firstThu)/(7*24*3600*1000));
+}
 function mondayOf(d){ const x=new Date(d); const w=(x.getDay()+6)%7; x.setDate(x.getDate()-w); x.setHours(0,0,0,0); return x; }
 const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
 const MON_DE = ['Jänner','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
@@ -125,6 +135,12 @@ function dayWorkedMin(dISO){
   return gross;
 }
 function dayWorkedH(dISO){ return minToH(dayWorkedMin(dISO)); }
+function daySpan(dISO){
+  const list=DB.entries[dISO]||[];
+  if(!list.length) return null;
+  const sorted=[...list].sort((a,b)=>a.from.localeCompare(b.from));
+  return {from:sorted[0].from, to:sorted[sorted.length-1].to};
+}
 
 // Tagessoll: Mo-Fr 8h, außer Feiertag (dann 0), Wochenende 0
 function daySollH(dISO){
@@ -289,8 +305,7 @@ function fitCalendar(){
 function renderAppbar(){
   const bar=document.getElementById('appbar');
   if(view==='overview'){
-    bar.innerHTML=`<div class="appbar-row" style="justify-content:center;"><div style="text-align:center;">
-      <div class="sub">Servus Robert</div><h1>Übersicht</h1></div></div>`;
+    bar.innerHTML=`<div class="appbar-row" style="justify-content:center;"><h1>Übersicht</h1></div>`;
   } else if(view==='calendar'){
     let title;
     if(calMode==='week'){ const wd=weekDates(cursor); title=`${pad(wd[0].getDate())}.–${pad(wd[6].getDate())}. ${MON_SHORT[wd[6].getMonth()]}`; }
@@ -351,11 +366,16 @@ function viewOverview(){
     else if(hol) pill=`<span class="pill hol">${hol}</span>`;
     const diff = isFuture ? null : dayBalanceH(di);
     const diffTxt = diff==null ? '–' : `${diff>=0?'+':''}${fmtHDec(diff)}`;
-    const diffColor = diff==null ? 'var(--text3)' : (diff>=0?'var(--ok-text)':'var(--low-text)');
+    const diffColor = diff==null ? 'var(--text3)' : (diff>=0?'var(--plus)':'var(--minus)');
     const workedTxt = worked>0 ? fmtH(worked) : (isFuture?'–':'0:00');
+    const span=daySpan(di);
+    const spanTxt = span ? `${span.from} – ${span.to}` : '';
     return `<button class="wrow wrow-tap" data-day="${di}"${isToday?' style="background:rgba(201,162,75,0.10); border-radius:14px; padding-left:10px; padding-right:10px;"':''}>
-      <div class="d ${isWeekend(d)?'we':''}">${DOW_DE[(d.getDay()+6)%7]} ${pad(d.getDate())}.${pill}</div>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div style="min-width:0;">
+        <div class="d ${isWeekend(d)?'we':''}">${DOW_DE[(d.getDay()+6)%7]} ${pad(d.getDate())}.${pill}</div>
+        ${spanTxt?`<div style="font-size:12px; color:var(--text3); margin-top:2px; font-variant-numeric:tabular-nums;">${spanTxt}</div>`:''}
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
         <div style="text-align:right;">
           <div class="h ${worked>0?'':'dim'}">${workedTxt}</div>
           <div style="font-size:12px; font-weight:700; color:${diffColor}; margin-top:1px;">${diffTxt}</div>
@@ -385,8 +405,8 @@ function viewOverview(){
   </div>
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-      <span style="font-size:15px; font-weight:700; color:var(--text);">Diese Woche</span>
-      <span style="font-size:14px; font-weight:700; color:${weekDiff>=0?'var(--ok-text)':'var(--low-text)'};">${weekDiff>=0?'+':''}${fmtHDec(weekDiff)} h</span>
+      <span style="font-size:15px; font-weight:700; color:var(--text);">Diese Woche <span style="font-weight:600; color:var(--text3); font-size:13px;">KW ${isoWeekNumber(new Date())}</span></span>
+      <span style="font-size:14px; font-weight:700; color:${weekDiff>=0?'var(--plus)':'var(--minus)'};">${weekDiff>=0?'+':''}${fmtHDec(weekDiff)} h</span>
     </div>
     ${rows}
   </div>
@@ -459,7 +479,7 @@ function calWeek(){
     <div class="stat dark" style="padding:14px 16px;"><div class="lbl">Ist / Soll</div>
       <div class="val" style="font-size:24px;">${fmtHDec(wSum)} / ${wSoll}</div></div>
     <div class="stat light" style="padding:14px 16px;"><div class="lbl">Differenz</div>
-      <div class="val" style="font-size:24px; color:${diff>=0?'var(--ok-text)':'var(--low-text)'};">${diff>=0?'+':''}${fmtHDec(diff)} h</div></div>
+      <div class="val" style="font-size:24px; color:${diff>=0?'var(--plus)':'var(--minus)'};">${diff>=0?'+':''}${fmtHDec(diff)} h</div></div>
   </div>`;
   return `${head}<div class="card" style="padding:4px 14px;">${rows}</div>${legend()}`;
 }
@@ -961,6 +981,42 @@ function exportCSV(){
    START
    ============================================================ */
 render();
+
+/* ---------- Swipe zwischen den Ansichten ---------- */
+const VIEW_ORDER = ['overview','calendar','capture','admin'];
+(function initSwipe(){
+  const el=document.getElementById('content');
+  if(!el) return;
+  let sx=0, sy=0, tracking=false, moved=false;
+  el.addEventListener('touchstart',(e)=>{
+    if(e.touches.length!==1){ tracking=false; return; }
+    // Nicht swipen, wenn ein Dialog offen ist
+    if(document.querySelector('.modal-back')){ tracking=false; return; }
+    sx=e.touches[0].clientX; sy=e.touches[0].clientY;
+    tracking=true; moved=false;
+  },{passive:true});
+  el.addEventListener('touchmove',(e)=>{
+    if(!tracking) return;
+    const dx=e.touches[0].clientX-sx, dy=e.touches[0].clientY-sy;
+    if(Math.abs(dx)>10||Math.abs(dy)>10) moved=true;
+  },{passive:true});
+  el.addEventListener('touchend',(e)=>{
+    if(!tracking||!moved) return;
+    tracking=false;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-sx, dy=t.clientY-sy;
+    // Nur horizontale, ausreichend weite Gesten
+    if(Math.abs(dx)<60) return;
+    if(Math.abs(dx)<Math.abs(dy)*1.5) return; // vertikales Scrollen hat Vorrang
+    const i=VIEW_ORDER.indexOf(view);
+    if(i<0) return;
+    const ni = dx<0 ? i+1 : i-1;
+    if(ni<0||ni>=VIEW_ORDER.length) return;
+    view=VIEW_ORDER[ni];
+    if(view!=='calendar'&&view!=='capture') cursor=new Date();
+    render();
+  },{passive:true});
+})();
 
 window.addEventListener('resize',()=>fitCalendar());
 window.addEventListener('orientationchange',()=>setTimeout(fitCalendar,150));
