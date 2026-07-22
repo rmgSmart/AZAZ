@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.9.0';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
@@ -167,17 +167,24 @@ function allDatesWithData(){
   const s = new Set([...Object.keys(DB.entries), ...Object.keys(DB.dayType)]);
   return [...s].sort();
 }
-function plusBalanceTotal(){
-  // Summe aller Tage-Beiträge vom Diensteintritt bis heute
+function plusBalanceUntil(cutoffISO){
+  // Summe aller Tage-Beiträge vom Diensteintritt bis zu einem Stichtag
   let sum=0;
   const start = DB.settings.hireDate || '2025-10-20';
   allDatesWithData().forEach(dISO=>{
     if(dISO < start) return;
-    if(dISO > todayISO()) return; // Zukunft nicht in Saldo
+    if(dISO > cutoffISO) return;
     sum += dayBalanceH(dISO);
   });
   return sum;
 }
+function plusBalanceTotal(){ return plusBalanceUntil(todayISO()); }
+function lastMonthEndISO(){
+  const t=new Date();
+  const last=new Date(t.getFullYear(), t.getMonth(), 0); // Tag 0 = letzter Tag des Vormonats
+  return iso(last);
+}
+function plusBalanceAtLastMonthEnd(){ return plusBalanceUntil(lastMonthEndISO()); }
 
 // Urlaubssaldo: Startbestand + Gutschrift pro 1.1. seit Eintritt - genommen(inkl. geplant)
 function vacTakenCount(){
@@ -282,7 +289,7 @@ function fitCalendar(){
 function renderAppbar(){
   const bar=document.getElementById('appbar');
   if(view==='overview'){
-    bar.innerHTML=`<div class="appbar-row"><div>
+    bar.innerHTML=`<div class="appbar-row" style="justify-content:center;"><div style="text-align:center;">
       <div class="sub">Servus Robert</div><h1>Übersicht</h1></div></div>`;
   } else if(view==='calendar'){
     let title;
@@ -306,7 +313,7 @@ function renderAppbar(){
         <button class="chevbtn" data-nav="next"><i class="ti ti-chevron-right"></i></button>
       </div>`;
   } else {
-    bar.innerHTML=`<div class="appbar-row"><h1>Verwaltung</h1></div>`;
+    bar.innerHTML=`<div class="appbar-row" style="justify-content:center;"><h1>Verwaltung</h1></div>`;
   }
 }
 
@@ -322,20 +329,36 @@ function renderTabbar(){
 
 /* ---------- OVERVIEW ---------- */
 function viewOverview(){
-  const plus = plusBalanceTotal();
+  const plus = plusBalanceAtLastMonthEnd();
+  const monthEndTxt = (()=>{ const d=parseISO(lastMonthEndISO()); return `${MON_DE[d.getMonth()]} ${d.getFullYear()}`; })();
   const vac = vacRemaining();
   const wd = weekDates(new Date());
-  const maxH = Math.max(DAY_SOLL, ...wd.map(d=>dayWorkedH(iso(d))), 1);
   const tIso = todayISO();
 
-  const bars = wd.map(d=>{
-    const di=iso(d), h=dayWorkedH(di), ht=Math.round(h/maxH*100);
-    const cls = di===tIso?'today':(isWeekend(d)?'we':'');
-    const valTxt = h>0 ? fmtHDec(h) : '';
-    return `<div class="bar-col">
-      <div class="bar-val">${valTxt}</div>
-      <div class="bar ${cls}" style="height:${Math.max(ht,3)}%"></div>
-      <div class="bar-lbl">${DOW_DE[(d.getDay()+6)%7]}</div>
+  const weekDiff = wd.reduce((s,d)=>{ const di=iso(d); return di<=tIso ? s+dayBalanceH(di) : s; },0);
+
+  const rows = wd.map(d=>{
+    const di=iso(d);
+    const worked=dayWorkedH(di);
+    const dt=DB.dayType[di];
+    const hol=holidayName(di);
+    const isToday = di===tIso;
+    const isFuture = di>tIso;
+    let pill='';
+    if(dt&&dt.type==='vac') pill=`<span class="pill vac">Urlaub${dt.half?' ½':''}</span>`;
+    else if(dt&&dt.type==='za') pill=`<span class="pill za">ZA${dt.half?' ½':''}</span>`;
+    else if(dt&&dt.type==='sick') pill=`<span class="pill sick">Krank${dt.half?' ½':''}</span>`;
+    else if(hol) pill=`<span class="pill hol">${hol}</span>`;
+    const diff = isFuture ? null : dayBalanceH(di);
+    const diffTxt = diff==null ? '–' : `${diff>=0?'+':''}${fmtHDec(diff)}`;
+    const diffColor = diff==null ? 'var(--text3)' : (diff>=0?'var(--ok-text)':'var(--low-text)');
+    const workedTxt = worked>0 ? fmtH(worked) : (isFuture?'–':'0:00');
+    return `<div class="wrow"${isToday?' style="background:rgba(201,162,75,0.10); border-radius:14px; padding-left:10px; padding-right:10px;"':''}>
+      <div class="d ${isWeekend(d)?'we':''}">${DOW_DE[(d.getDay()+6)%7]} ${pad(d.getDate())}.${pill}</div>
+      <div style="text-align:right;">
+        <div class="h ${worked>0?'':'dim'}">${workedTxt}</div>
+        <div style="font-size:12px; font-weight:700; color:${diffColor}; margin-top:1px;">${diffTxt}</div>
+      </div>
     </div>`;
   }).join('');
 
@@ -354,15 +377,15 @@ function viewOverview(){
   return `
   <div class="stat-grid">
     <div class="stat dark"><div class="lbl">Plusstunden</div>
-      <div class="val">${plus>=0?'+':''}${fmtHDec(plus)}</div><div class="hint">kumuliert</div></div>
+      <div class="val">${plus>=0?'+':''}${fmtHDec(plus)}</div><div class="hint">Stand Ende ${monthEndTxt}</div></div>
     ${vacCard}
   </div>
   <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:baseline;">
-      <span style="font-size:14px; font-weight:600; color:var(--green);">Diese Woche</span>
-      <span style="font-size:13px; color:var(--gold-text); font-weight:600;">${fmtHDec(weekWorkedH(new Date()))} / ${weekSollH(new Date())} h</span>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <span style="font-size:15px; font-weight:700; color:var(--text);">Diese Woche</span>
+      <span style="font-size:14px; font-weight:700; color:${weekDiff>=0?'var(--ok-text)':'var(--low-text)'};">${weekDiff>=0?'+':''}${fmtHDec(weekDiff)} h</span>
     </div>
-    <div class="bars">${bars}</div>
+    ${rows}
   </div>
   <div class="card" style="background:rgba(201,162,75,0.14); border:1px solid rgba(201,162,75,0.22); display:flex; align-items:center; gap:10px;">
     <i class="ti ti-calendar-star" style="color:var(--gold-text); font-size:19px;"></i>
@@ -543,7 +566,7 @@ function viewCapture(){
   const dayH = dayWorkedH(di);
   const summary = (list.length)?`<div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
     <span style="font-size:var(--t-sub); color:var(--text2); font-weight:600;">Tag netto${dayGrossMin(di)>PAUSE_THRESHOLD*60?' <span style="font-weight:500; color:var(--text3)">(−30 min Pause)</span>':''}</span>
-    <span style="font-size:22px; font-weight:700; color:var(--green);">${fmtH(dayH)}</span></div>`:'';
+    <span style="font-size:22px; font-weight:700; color:var(--gold-text);">${fmtH(dayH)}</span></div>`:'';
 
   return `
   ${timerBox}
@@ -651,7 +674,7 @@ function openEntryModal(editId=null, preset=null){
   const di=iso(cursor);
   let e = editId ? (DB.entries[di]||[]).find(x=>x.id===editId) : null;
   const from = e?e.from : (preset?preset.from:'09:00');
-  const to = e?e.to : (preset?preset.to:'17:00');
+  const to = e?e.to : (preset?preset.to:'17:30');
   const wp = e?e.wp:'I';
   const info = e?e.info:'';
   const order = e?e.order:'RISE Operations';
