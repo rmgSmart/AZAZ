@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
@@ -337,7 +337,7 @@ function viewOverview(){
 
   const weekDiff = wd.reduce((s,d)=>{ const di=iso(d); return di<=tIso ? s+dayBalanceH(di) : s; },0);
 
-  const rows = wd.map(d=>{
+  const rows = wd.filter(d=>!isWeekend(d)).map(d=>{
     const di=iso(d);
     const worked=dayWorkedH(di);
     const dt=DB.dayType[di];
@@ -528,7 +528,10 @@ function viewCapture(){
         <div class="timer-hint">Zeit läuft im Hintergrund mit, ohne Anzeige</div>
         <button class="timer-btn stop" id="timer-btn"><i class="ti ti-player-stop-filled"></i>Stop</button></div>`;
     } else {
+      const now=new Date();
       timerBox=`<div class="timer-box">
+        <div class="timer-status">Jetzt ${pad(now.getHours())}:${pad(now.getMinutes())} Uhr</div>
+        <div class="timer-hint">Diese Zeit wird als Start verwendet</div>
         <button class="timer-btn start" id="timer-btn"><i class="ti ti-player-play-filled"></i>Start</button></div>`;
     }
   }
@@ -723,10 +726,10 @@ function openTypeModal(){
       <button data-t="za" class="${sel==='za'?'on za':''}">Zeitausgleich</button>
       <button data-t="sick" class="${sel==='sick'?'on sick':''}">Krank</button>
     </div>
-    <div class="half-toggle">
-      <label for="t-half">Halber Tag</label>
+    <label class="half-toggle" for="t-half">
+      <span>Halber Tag</span>
       <span class="switch"><input type="checkbox" id="t-half" ${half?'checked':''}><span class="slider"></span></span>
-    </div>
+    </label>
     <p style="font-size:12px; color:var(--text2); margin:4px 0 14px; line-height:1.5;">
       Urlaub zieht vom Urlaubskonto ab. ZA baut Plusstunden ab. Krank ist nur Dokumentation.
       Für 24.12. und 31.12. „Urlaub“ + „Halber Tag“ wählen.</p>
