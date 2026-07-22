@@ -358,13 +358,13 @@ function viewOverview(){
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:baseline;">
       <span style="font-size:14px; font-weight:600; color:var(--green);">Diese Woche</span>
-      <span style="font-size:13px; color:var(--gold-dark); font-weight:600;">${fmtHDec(weekWorkedH(new Date()))} / ${weekSollH(new Date())} h</span>
+      <span style="font-size:13px; color:var(--gold-text); font-weight:600;">${fmtHDec(weekWorkedH(new Date()))} / ${weekSollH(new Date())} h</span>
     </div>
     <div class="bars">${bars}</div>
   </div>
-  <div class="card" style="background:var(--creamline); border:none; display:flex; align-items:center; gap:10px;">
-    <i class="ti ti-calendar-star" style="color:var(--gold-dark); font-size:19px;"></i>
-    <span style="font-size:13px; color:var(--gold-dark);">Nächster Feiertag: ${nhTxt}</span>
+  <div class="card" style="background:rgba(201,162,75,0.14); border:1px solid rgba(201,162,75,0.22); display:flex; align-items:center; gap:10px;">
+    <i class="ti ti-calendar-star" style="color:var(--gold-text); font-size:19px;"></i>
+    <span style="font-size:13px; color:var(--gold-text); font-weight:600;">Nächster Feiertag: ${nhTxt}</span>
   </div>`;
 }
 
@@ -451,7 +451,7 @@ function calYear(){
       cells+=`<span class="mc" style="background:${colorMap[cls]||'rgba(20,52,43,0.06)'}"></span>`;
     }
     const isCur=(y===curY&&m===curM);
-    out+=`<button class="mini" data-month="${m}" style="${isCur?'box-shadow:0 0 0 2px var(--green);':''}"><div class="mname">${MON_SHORT[m]}</div><div class="mg">${cells}</div></button>`;
+    out+=`<button class="mini" data-month="${m}" style="${isCur?'box-shadow:0 0 0 2px var(--gold);':''}"><div class="mname">${MON_SHORT[m]}</div><div class="mg">${cells}</div></button>`;
   }
   out+='</div>';
   // Summenzeile
@@ -485,12 +485,6 @@ function captureTitle(){
 function viewCapture(){
   const di=iso(cursor);
   const running = timer!==null;
-  let disp='00:00:00';
-  if(running){
-    let sec=Math.floor((Date.now()-timer.start)/1000);
-    const hh=Math.floor(sec/3600); sec%=3600;
-    disp=pad(hh)+':'+pad(Math.floor(sec/60))+':'+pad(sec%60);
-  }
   const list=DB.entries[di]||[];
   const dt=DB.dayType[di];
 
@@ -502,10 +496,16 @@ function viewCapture(){
       <span style="font-weight:700;">Anzeigen</span></button>`;
   }
   if(iso(cursor)===todayISO()){
-    timerBox=`<div class="timer-box">
-      <div class="timer-display" id="timer-disp">${disp}</div>
-      <button class="timer-btn ${running?'stop':'start'}" id="timer-btn">
-        <i class="ti ${running?'ti-player-stop-filled':'ti-player-play-filled'}"></i>${running?'Stop':'Start'}</button></div>`;
+    if(running){
+      const st=new Date(timer.start);
+      timerBox=`<div class="timer-box">
+        <div class="timer-status">Gestartet um ${pad(st.getHours())}:${pad(st.getMinutes())} Uhr</div>
+        <div class="timer-hint">Zeit läuft im Hintergrund mit, ohne Anzeige</div>
+        <button class="timer-btn stop" id="timer-btn"><i class="ti ti-player-stop-filled"></i>Stop</button></div>`;
+    } else {
+      timerBox=`<div class="timer-box">
+        <button class="timer-btn start" id="timer-btn"><i class="ti ti-player-play-filled"></i>Start</button></div>`;
+    }
   }
 
   let typeBanner='';
@@ -605,7 +605,6 @@ function bindContent(){
     document.querySelectorAll('[data-edit]').forEach(el=>el.onclick=()=>openEntryModal(el.dataset.edit));
     document.querySelectorAll('[data-cleartype]').forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation();
       delete DB.dayType[el.dataset.cleartype]; save(); render(); });
-    if(timer) startTick();
   }
   if(view==='admin') bindAdmin();
   const vq=document.getElementById('vac-quick'); if(vq) vq.onclick=openVacModal;
@@ -621,7 +620,6 @@ function navigate(dir){
 }
 
 /* ---------- Timer ---------- */
-let tickInt=null;
 function toggleTimer(){
   if(timer){
     // Stop -> Eintrag am Starttag des Timers anlegen (nicht am angezeigten Tag)
@@ -629,21 +627,13 @@ function toggleTimer(){
     const from=pad(start.getHours())+':'+pad(start.getMinutes());
     const to=pad(end.getHours())+':'+pad(end.getMinutes());
     const timerDate=timer.dateISO || iso(start);
-    timer=null; saveTimer(); stopTick();
+    timer=null; saveTimer();
     cursor=parseISO(timerDate);
     render();
     openEntryModal(null, {from,to});
   } else {
-    timer={start:Date.now(), dateISO:todayISO()}; saveTimer(); startTick(); render();
+    timer={start:Date.now(), dateISO:todayISO()}; saveTimer(); render();
   }
-}
-function startTick(){ stopTick(); tickInt=setInterval(updateTimerDisp,1000); updateTimerDisp(); }
-function stopTick(){ if(tickInt){clearInterval(tickInt); tickInt=null;} }
-function updateTimerDisp(){
-  const el=document.getElementById('timer-disp'); if(!el||!timer)return;
-  let s=Math.floor((Date.now()-timer.start)/1000);
-  const h=Math.floor(s/3600); s%=3600; const m=Math.floor(s/60); s%=60;
-  el.textContent=pad(h)+':'+pad(m)+':'+pad(s);
 }
 
 /* ---------- Modal Framework ---------- */
