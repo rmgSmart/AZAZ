@@ -286,6 +286,7 @@ input,select,textarea{font-family:inherit; font-size:var(--t-body);}
   border-radius:16px; background:rgba(255,255,255,0.9); color:var(--text);
   font-size:var(--t-body); -webkit-appearance:none; appearance:none;
 }
+.field input[type="time"]{min-height:54px; text-align:left; display:flex; align-items:center;}
 .field select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath fill='%235C6960' d='M7 9L0 2l2-2 5 5 5-5 2 2z'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 16px center; padding-right:42px;}
 .field input:focus,.field select:focus,.field textarea:focus{outline:none; border-color:var(--green); box-shadow:0 0 0 3px rgba(20,52,43,0.10);}
 .field textarea{resize:vertical; min-height:78px; line-height:1.5;}
@@ -337,6 +338,7 @@ input,select,textarea{font-family:inherit; font-size:var(--t-body);}
 .bar.today{background:linear-gradient(180deg,#DCB86A,var(--gold));}
 .bar.we{background:var(--weekend);}
 .bar-lbl{font-size:var(--t-cap2); color:var(--text2); margin-top:7px; font-weight:600;}
+.bar-val{font-size:10px; color:var(--text3); margin-bottom:4px; font-weight:600; font-variant-numeric:tabular-nums; min-height:13px;}
 </style>
 </head>
 <body>

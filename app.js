@@ -17,10 +17,21 @@ let DB = load();
 let view = 'overview';         // overview | calendar | capture | admin
 let calMode = 'month';         // week | month | year
 let cursor = new Date();       // navigierbares Datum
-let timer = null;              // {start: ms}
+let timer = loadTimer();       // {start: ms, dateISO} — persistiert, überlebt App-Neustart
 let modal = null;
 
 /* ---------- Persistence ---------- */
+const TIMER_KEY='zeit_timer_v1';
+function loadTimer(){
+  try{ const raw=localStorage.getItem(TIMER_KEY); if(raw) return JSON.parse(raw); }catch(e){}
+  return null;
+}
+function saveTimer(){
+  try{
+    if(timer) localStorage.setItem(TIMER_KEY, JSON.stringify(timer));
+    else localStorage.removeItem(TIMER_KEY);
+  }catch(e){}
+}
 function load(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
@@ -102,9 +113,12 @@ function entryNetMin(e){
   return d;
 }
 // Summe eines Tages brutto (Minuten), dann Pause abziehen wenn >6h
-function dayWorkedMin(dISO){
+function dayGrossMin(dISO){
   const list = DB.entries[dISO]||[];
-  let gross = list.reduce((s,e)=> s+entryNetMin(e), 0);
+  return list.reduce((s,e)=> s+entryNetMin(e), 0);
+}
+function dayWorkedMin(dISO){
+  let gross = dayGrossMin(dISO);
   if(gross > PAUSE_THRESHOLD*60) gross -= PAUSE_MIN;
   return gross;
 }
@@ -300,15 +314,14 @@ function renderTabbar(){
     ['capture','ti-clock','Erfassung'],
     ['admin','ti-settings','Verwaltung']];
   document.getElementById('tabbar').innerHTML = tabs.map(([id,ic,lbl])=>
-    `<button data-tab="${id}" class="${view===id?'active':''}">
-       <i class="ti ${ic}"></i>${lbl}</button>`).join('');
+    `<button data-tab="${id}" class="${view===id?'active':''}" style="position:relative;">
+       <i class="ti ${ic}"></i>${lbl}${id==='capture'&&timer?'<span style="position:absolute; top:6px; right:22%; width:9px; height:9px; border-radius:50%; background:var(--gold); box-shadow:0 0 0 2px rgba(255,255,255,0.8);"></span>':''}</button>`).join('');
 }
 
 /* ---------- OVERVIEW ---------- */
 function viewOverview(){
   const plus = plusBalanceTotal();
   const vac = vacRemaining();
-  const wW = weekWorkedH(cursor), wS = weekSollH(cursor);
   const wd = weekDates(new Date());
   const maxH = Math.max(DAY_SOLL, ...wd.map(d=>dayWorkedH(iso(d))), 1);
   const tIso = todayISO();
@@ -316,7 +329,9 @@ function viewOverview(){
   const bars = wd.map(d=>{
     const di=iso(d), h=dayWorkedH(di), ht=Math.round(h/maxH*100);
     const cls = di===tIso?'today':(isWeekend(d)?'we':'');
+    const valTxt = h>0 ? fmtHDec(h) : '';
     return `<div class="bar-col">
+      <div class="bar-val">${valTxt}</div>
       <div class="bar ${cls}" style="height:${Math.max(ht,3)}%"></div>
       <div class="bar-lbl">${DOW_DE[(d.getDay()+6)%7]}</div>
     </div>`;
@@ -328,9 +343,9 @@ function viewOverview(){
   const nhTxt = nh ? `${pad(parseISO(nh.di).getDate())}. ${MON_SHORT[parseISO(nh.di).getMonth()]} · ${nh.n}` : '–';
 
   const vacCard = vac==null
-    ? `<div class="stat light"><div class="lbl">Resturlaub</div>
-         <div class="val" style="font-size:16px;">einrichten</div>
-         <div class="hint">in Verwaltung</div></div>`
+    ? `<button class="stat light" id="vac-quick" style="text-align:left; width:100%;"><div class="lbl">Resturlaub</div>
+         <div class="val" style="font-size:19px; display:flex; align-items:center; gap:6px;">Einrichten <i class="ti ti-chevron-right" style="font-size:16px;"></i></div>
+         <div class="hint">Startbestand eingeben</div></button>`
     : `<div class="stat light"><div class="lbl">Resturlaub</div>
          <div class="val">${fmtHDec(vac)}</div><div class="hint">von 25 Tagen/Jahr</div></div>`;
 
@@ -410,21 +425,33 @@ function calWeek(){
       <div class="d ${isWeekend(d)?'we':''}">${DOW_DE[(d.getDay()+6)%7]} ${pad(d.getDate())}.${pill}</div>
       <div class="h ${worked>0?'':'dim'}">${hTxt||'–'}</div></div>`;
   });
-  return `<div class="card" style="padding:4px 12px;">${rows}</div>${legend()}`;
+  const wSum=weekWorkedH(cursor), wSoll=weekSollH(cursor);
+  const diff=wSum-wSoll;
+  const head=`<div class="stat-grid">
+    <div class="stat dark" style="padding:14px 16px;"><div class="lbl">Ist / Soll</div>
+      <div class="val" style="font-size:24px;">${fmtHDec(wSum)} / ${wSoll}</div></div>
+    <div class="stat light" style="padding:14px 16px;"><div class="lbl">Differenz</div>
+      <div class="val" style="font-size:24px; color:${diff>=0?'var(--ok-text)':'var(--low-text)'};">${diff>=0?'+':''}${fmtHDec(diff)} h</div></div>
+  </div>`;
+  return `${head}<div class="card" style="padding:4px 14px;">${rows}</div>${legend()}`;
 }
 function calYear(){
   const y=cursor.getFullYear();
+  const curM=new Date().getMonth(), curY=new Date().getFullYear();
   let out='<div class="ygrid">';
   for(let m=0;m<12;m++){
     const days=new Date(y,m+1,0).getDate();
+    const off=(new Date(y,m,1).getDay()+6)%7; // Mo=0
     let cells='';
+    for(let i=0;i<off;i++) cells+='<span class="mc" style="background:transparent;"></span>';
     for(let dd=1;dd<=days;dd++){
       const di=iso(new Date(y,m,dd));
       const cls=cellClass(di);
-      const colorMap={'work-ok':'var(--ok-bg)','work-low':'var(--low-bg)',work:'var(--green)',vac:'var(--gold)',za:'var(--sage)',sick:'var(--clay)','we-cell':'var(--weekend)',empty:'var(--creamline)'};
-      cells+=`<span class="mc" style="background:${colorMap[cls]||'var(--creamline)'}"></span>`;
+      const colorMap={'work-ok':'var(--ok-bg)','work-low':'var(--low-bg)',work:'var(--green)',vac:'var(--gold)',za:'var(--sage)',sick:'var(--clay)','we-cell':'var(--weekend)'};
+      cells+=`<span class="mc" style="background:${colorMap[cls]||'rgba(20,52,43,0.06)'}"></span>`;
     }
-    out+=`<div class="mini"><div class="mname">${MON_SHORT[m]}</div><div class="mg">${cells}</div></div>`;
+    const isCur=(y===curY&&m===curM);
+    out+=`<button class="mini" data-month="${m}" style="${isCur?'box-shadow:0 0 0 2px var(--green);':''}"><div class="mname">${MON_SHORT[m]}</div><div class="mg">${cells}</div></button>`;
   }
   out+='</div>';
   // Summenzeile
@@ -459,10 +486,21 @@ function viewCapture(){
   const di=iso(cursor);
   const running = timer!==null;
   let disp='00:00:00';
+  if(running){
+    let sec=Math.floor((Date.now()-timer.start)/1000);
+    const hh=Math.floor(sec/3600); sec%=3600;
+    disp=pad(hh)+':'+pad(Math.floor(sec/60))+':'+pad(sec%60);
+  }
   const list=DB.entries[di]||[];
   const dt=DB.dayType[di];
 
   let timerBox='';
+  if(timer && iso(cursor)!==todayISO()){
+    const st=new Date(timer.start);
+    timerBox=`<button class="type-banner za" id="goto-timer" style="width:100%;">
+      <span><i class="ti ti-clock-play" style="vertical-align:-2px; margin-right:6px;"></i>Timer läuft seit ${pad(st.getHours())}:${pad(st.getMinutes())}</span>
+      <span style="font-weight:700;">Anzeigen</span></button>`;
+  }
   if(iso(cursor)===todayISO()){
     timerBox=`<div class="timer-box">
       <div class="timer-display" id="timer-disp">${disp}</div>
@@ -471,6 +509,12 @@ function viewCapture(){
   }
 
   let typeBanner='';
+  const holName=holidayName(di);
+  if(holName && !dt){
+    typeBanner=`<div class="type-banner vac" style="background:rgba(201,162,75,0.16);">
+      <span><i class="ti ti-calendar-star" style="vertical-align:-2px; margin-right:6px;"></i>${holName}</span>
+      <span style="font-size:var(--t-cap); font-weight:600; opacity:.8;">Soll 0 h</span></div>`;
+  }
   if(dt){
     const names={vac:'Urlaub',za:'Zeitausgleich',sick:'Krank'};
     typeBanner=`<div class="type-banner ${dt.type}">
@@ -496,7 +540,7 @@ function viewCapture(){
 
   const dayH = dayWorkedH(di);
   const summary = (list.length)?`<div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
-    <span style="font-size:var(--t-sub); color:var(--text2); font-weight:600;">Tag netto${dayH>PAUSE_THRESHOLD?' <span style="font-weight:500; color:var(--text3)">(−30 min Pause)</span>':''}</span>
+    <span style="font-size:var(--t-sub); color:var(--text2); font-weight:600;">Tag netto${dayGrossMin(di)>PAUSE_THRESHOLD*60?' <span style="font-weight:500; color:var(--text3)">(−30 min Pause)</span>':''}</span>
     <span style="font-size:22px; font-weight:700; color:var(--green);">${fmtH(dayH)}</span></div>`:'';
 
   return `
@@ -551,9 +595,11 @@ function bindContent(){
   document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>navigate(b.dataset.nav));
   // Calendar day tap -> capture that day
   document.querySelectorAll('[data-day]').forEach(el=>el.onclick=()=>{ cursor=parseISO(el.dataset.day); view='capture'; render(); });
+  document.querySelectorAll('[data-month]').forEach(el=>el.onclick=()=>{ cursor=new Date(cursor.getFullYear(), Number(el.dataset.month), 1); calMode='month'; render(); });
 
   if(view==='capture'){
     const tb=document.getElementById('timer-btn'); if(tb) tb.onclick=toggleTimer;
+    const gt=document.getElementById('goto-timer'); if(gt) gt.onclick=()=>{ cursor=new Date(); render(); };
     const am=document.getElementById('add-manual'); if(am) am.onclick=()=>openEntryModal();
     const st=document.getElementById('set-type'); if(st) st.onclick=openTypeModal;
     document.querySelectorAll('[data-edit]').forEach(el=>el.onclick=()=>openEntryModal(el.dataset.edit));
@@ -562,6 +608,7 @@ function bindContent(){
     if(timer) startTick();
   }
   if(view==='admin') bindAdmin();
+  const vq=document.getElementById('vac-quick'); if(vq) vq.onclick=openVacModal;
 }
 
 function navigate(dir){
@@ -577,14 +624,17 @@ function navigate(dir){
 let tickInt=null;
 function toggleTimer(){
   if(timer){
-    // Stop -> Eintrag anlegen
+    // Stop -> Eintrag am Starttag des Timers anlegen (nicht am angezeigten Tag)
     const start=new Date(timer.start), end=new Date();
     const from=pad(start.getHours())+':'+pad(start.getMinutes());
     const to=pad(end.getHours())+':'+pad(end.getMinutes());
-    timer=null; stopTick();
+    const timerDate=timer.dateISO || iso(start);
+    timer=null; saveTimer(); stopTick();
+    cursor=parseISO(timerDate);
+    render();
     openEntryModal(null, {from,to});
   } else {
-    timer={start:Date.now()}; startTick(); render();
+    timer={start:Date.now(), dateISO:todayISO()}; saveTimer(); startTick(); render();
   }
 }
 function startTick(){ stopTick(); tickInt=setInterval(updateTimerDisp,1000); updateTimerDisp(); }
@@ -615,7 +665,7 @@ function openEntryModal(editId=null, preset=null){
   const order = e?e.order:'RISE Operations';
   const wpOpts = Object.entries(WP_TYPES).map(([k,v])=>`<option value="${k}" ${wp===k?'selected':''}>${k} · ${v}</option>`).join('');
   openModal(`
-    <h2>${editId?'Eintrag bearbeiten':'Neuer Eintrag'}<button class="x" data-close>&times;</button></h2>
+    <h2><span>${editId?'Eintrag':'Neuer Eintrag'} <span style="font-weight:500; color:var(--text2); font-size:var(--t-sub);">· ${DOW_DE[(cursor.getDay()+6)%7]} ${pad(cursor.getDate())}.${pad(cursor.getMonth()+1)}.</span></span><button class="x" data-close>&times;</button></h2>
     <div class="field-row">
       <div class="field"><label>Von</label><input type="time" id="f-from" value="${from}"></div>
       <div class="field"><label>Bis</label><input type="time" id="f-to" value="${to}"></div>
@@ -689,14 +739,14 @@ function openVacModal(){
     <p style="font-size:13px; color:var(--text2); margin-bottom:14px; line-height:1.55;">
       Gib den Reststand zum Jahresende deines Eintrittsjahres ein. Ab dann rechnet die App
       jeden 1.1. +25 Tage dazu (kein Verfall) und zieht deine Urlaubstage ab.</p>
-    <div class="field"><label>Eintrittsjahr</label><input type="number" id="v-year" value="${s.startYear||2025}"></div>
+    <div class="field"><label>Eintrittsjahr</label><input type="text" inputmode="numeric" id="v-year" value="${s.startYear||2025}"></div>
     <div class="field"><label>Resturlaub Ende ${s.startYear||2025} (Tage)</label>
-      <input type="number" step="0.5" id="v-bal" value="${s.startVacBalance??''}" placeholder="z.B. 5"></div>
+      <input type="text" inputmode="decimal" id="v-bal" value="${s.startVacBalance??''}" placeholder="z.B. 5"></div>
     <button class="primary" id="v-save">Speichern</button>
   `);
   document.getElementById('v-save').onclick=()=>{
     const y=parseInt(document.getElementById('v-year').value);
-    const b=parseFloat(document.getElementById('v-bal').value);
+    const b=parseFloat(String(document.getElementById('v-bal').value).replace(',','.'));
     if(isNaN(b)){ toast('Bitte Reststand angeben'); return; }
     DB.settings.startYear=y||2025; DB.settings.startVacBalance=b;
     save(); closeModal(); render();
@@ -842,6 +892,9 @@ function exportCSV(){
    START
    ============================================================ */
 render();
+
+window.addEventListener('resize',()=>fitCalendar());
+window.addEventListener('orientationchange',()=>setTimeout(fitCalendar,150));
 
 /* Service Worker für Offline (optional, schlägt lokal ohne https fehl -> egal) */
 if('serviceWorker' in navigator){
