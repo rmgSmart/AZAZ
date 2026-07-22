@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
@@ -797,9 +797,11 @@ function bindAdmin(){
 
 /* ============================================================
    EXCEL IMPORT
-   Erwartetes Format (GROB Export): Spalten
-   [A,F,D,T], Order, Status, From, To, Total, Work place, Info, Info Backoffice
-   Datumsspalte = Index 2 (dd.mm.yyyy)
+   Erkennt zwei Formate pro Blatt automatisch:
+   1) GROB Zeitexport: Spalten [A,F,D,T], Order, Status, From, To,
+      Total, Work place, Info, Info Backoffice (Datum = Index 2)
+   2) Eigenes Tagestyp-Format: Spalten Datum | Typ | Halbtag
+      (Typ: Urlaub / ZA / Krank, Halbtag: Ja/Nein)
    ============================================================ */
 function handleImport(ev){
   const file=ev.target.files[0]; if(!file) return;
@@ -812,27 +814,8 @@ function handleImport(ev){
       wb.SheetNames.forEach(sn=>{
         const ws=wb.Sheets[sn];
         const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
-        rows.forEach(r=>{
-          // Header/leer überspringen
-          const dateCell=r[2];
-          if(!dateCell || !/^\d{2}\.\d{2}\.\d{4}$/.test(String(dateCell).trim())) return;
-          const [dd,mm,yy]=String(dateCell).trim().split('.');
-          const di=`${yy}-${mm}-${dd}`;
-          const order=String(r[4]||'').trim();
-          const from=normTime(r[6]); const to=normTime(r[7]);
-          const wpRaw=String(r[9]||'').trim().toUpperCase();
-          const wp=WP_TYPES[wpRaw]?wpRaw:(wpRaw||'');
-          const info=String(r[10]||'').trim().replace(/\\n/g,' ').trim();
-          // nur Zeilen mit echter Zeit übernehmen
-          if(!from||!to) return;
-          // Schutz: manuell gesetzter Tagestyp bleibt, Einträge werden nicht doppelt angelegt
-          if(!DB.entries[di]) DB.entries[di]=[];
-          const dup=DB.entries[di].some(x=>x.from===from&&x.to===to&&x.order===order);
-          if(dup){ skipped++; return; }
-          DB.entries[di].push({id:uid(),from,to,order,wp,info});
-          DB.entries[di].sort((a,b)=>a.from.localeCompare(b.from));
-          added++;
-        });
+        const result = isDayTypeSheet(rows) ? importDayTypeRows(rows) : importTimeRows(rows);
+        added+=result.added; skipped+=result.skipped;
       });
       save(); render();
       toast(`Import: ${added} neu, ${skipped} übersprungen`);
@@ -840,6 +823,58 @@ function handleImport(ev){
     ev.target.value='';
   };
   reader.readAsArrayBuffer(file);
+}
+function isDayTypeSheet(rows){
+  if(!rows.length) return false;
+  const header=rows[0].map(c=>String(c||'').trim().toLowerCase());
+  return header.includes('datum') && header.includes('typ');
+}
+function importDayTypeRows(rows){
+  let added=0, skipped=0;
+  const header=rows[0].map(c=>String(c||'').trim().toLowerCase());
+  const iDate=header.indexOf('datum'), iTyp=header.indexOf('typ'), iHalb=header.indexOf('halbtag');
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i];
+    const dateCell=r[iDate];
+    if(!dateCell || !/^\d{2}\.\d{2}\.\d{4}$/.test(String(dateCell).trim())){ continue; }
+    const [dd,mm,yy]=String(dateCell).trim().split('.');
+    const di=`${yy}-${mm}-${dd}`;
+    const typRaw=String(r[iTyp]||'').trim().toLowerCase();
+    let type=null;
+    if(typRaw.startsWith('urlaub')) type='vac';
+    else if(typRaw.startsWith('za')||typRaw.startsWith('zeitausgleich')||typRaw.startsWith('gleitzeit')) type='za';
+    else if(typRaw.startsWith('krank')) type='sick';
+    if(!type){ skipped++; continue; }
+    const halbRaw=String(r[iHalb]||'').trim().toLowerCase();
+    const half = halbRaw==='ja'||halbRaw==='true'||halbRaw==='1'||halbRaw==='x';
+    // Schutz: bestehender Tagestyp (manuell oder aus früherem Import) bleibt unangetastet
+    if(DB.dayType[di]){ skipped++; continue; }
+    DB.dayType[di]={type,half};
+    added++;
+  }
+  return {added,skipped};
+}
+function importTimeRows(rows){
+  let added=0, skipped=0;
+  rows.forEach(r=>{
+    const dateCell=r[2];
+    if(!dateCell || !/^\d{2}\.\d{2}\.\d{4}$/.test(String(dateCell).trim())) return;
+    const [dd,mm,yy]=String(dateCell).trim().split('.');
+    const di=`${yy}-${mm}-${dd}`;
+    const order=String(r[4]||'').trim();
+    const from=normTime(r[6]); const to=normTime(r[7]);
+    const wpRaw=String(r[9]||'').trim().toUpperCase();
+    const wp=WP_TYPES[wpRaw]?wpRaw:(wpRaw||'');
+    const info=String(r[10]||'').trim().replace(/\\n/g,' ').trim();
+    if(!from||!to) return;
+    if(!DB.entries[di]) DB.entries[di]=[];
+    const dup=DB.entries[di].some(x=>x.from===from&&x.to===to&&x.order===order);
+    if(dup){ skipped++; return; }
+    DB.entries[di].push({id:uid(),from,to,order,wp,info});
+    DB.entries[di].sort((a,b)=>a.from.localeCompare(b.from));
+    added++;
+  });
+  return {added,skipped};
 }
 function normTime(v){
   if(v==null) return '';
