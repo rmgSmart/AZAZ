@@ -6,6 +6,8 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
+const APP_VERSION = '1.7.0';
+const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
 const PAUSE_MIN = 30;          // Minuten Pause
@@ -769,6 +771,13 @@ function openRulesModal(){
 }
 function openAboutModal(){
   openModal(`<h2>Über die App<button class="x" data-close>&times;</button></h2>
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div>
+        <div style="font-size:12px; color:var(--text3); font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">Version</div>
+        <div style="font-size:22px; font-weight:700; color:var(--gold-text); margin-top:2px;">${APP_VERSION}</div>
+      </div>
+      <div style="text-align:right; font-size:13px; color:var(--text3);">Stand<br><b style="color:var(--text2);">${APP_BUILD}</b></div>
+    </div>
     <div class="card" style="line-height:1.7; font-size:14px;">
       Zeiterfassung PWA · lokale Speicherung am Gerät.<br>
       Deine Daten bleiben in diesem Browser. CSV-Export als Backup nutzen.<br>
