@@ -6,7 +6,7 @@
    ============================================================ */
 
 const STORE_KEY = 'zeit_data_v1';
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 const APP_BUILD = '2026-07-22';
 const WP_TYPES = { I:'Office duty', A:'On field', D:'On-site service', O:'Field service o. Aufwand', T:'Homeoffice', U:'Abroad' };
 const DAY_SOLL = 8;            // Stunden pro Werktag Mo-Fr
@@ -353,13 +353,16 @@ function viewOverview(){
     const diffTxt = diff==null ? '–' : `${diff>=0?'+':''}${fmtHDec(diff)}`;
     const diffColor = diff==null ? 'var(--text3)' : (diff>=0?'var(--ok-text)':'var(--low-text)');
     const workedTxt = worked>0 ? fmtH(worked) : (isFuture?'–':'0:00');
-    return `<div class="wrow"${isToday?' style="background:rgba(201,162,75,0.10); border-radius:14px; padding-left:10px; padding-right:10px;"':''}>
+    return `<button class="wrow wrow-tap" data-day="${di}"${isToday?' style="background:rgba(201,162,75,0.10); border-radius:14px; padding-left:10px; padding-right:10px;"':''}>
       <div class="d ${isWeekend(d)?'we':''}">${DOW_DE[(d.getDay()+6)%7]} ${pad(d.getDate())}.${pill}</div>
-      <div style="text-align:right;">
-        <div class="h ${worked>0?'':'dim'}">${workedTxt}</div>
-        <div style="font-size:12px; font-weight:700; color:${diffColor}; margin-top:1px;">${diffTxt}</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="text-align:right;">
+          <div class="h ${worked>0?'':'dim'}">${workedTxt}</div>
+          <div style="font-size:12px; font-weight:700; color:${diffColor}; margin-top:1px;">${diffTxt}</div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--text3); font-size:18px;"></i>
       </div>
-    </div>`;
+    </button>`;
   }).join('');
 
   // nächster Feiertag
@@ -576,7 +579,7 @@ function viewCapture(){
   ${typeBanner}
   <div class="act-row">
     <button class="act-btn" id="add-manual"><i class="ti ti-plus"></i>Eintrag</button>
-    <button class="act-btn" id="set-type"><i class="ti ti-calendar-event"></i>Tagestyp</button>
+    <button class="act-btn ${dt?'act-btn-'+dt.type:''}" id="set-type"><i class="ti ti-calendar-event"></i>${dt?({vac:'Urlaub',za:'Zeitausgleich',sick:'Krank'}[dt.type])+(dt.half?' ½':''):'Arbeitstag'}</button>
   </div>
   ${entriesHtml}
   ${summary}`;
@@ -726,10 +729,10 @@ function openTypeModal(){
       <button data-t="za" class="${sel==='za'?'on za':''}">Zeitausgleich</button>
       <button data-t="sick" class="${sel==='sick'?'on sick':''}">Krank</button>
     </div>
-    <label class="half-toggle" for="t-half">
+    <button type="button" class="half-toggle" id="t-half-btn" aria-pressed="${half?'true':'false'}">
       <span>Halber Tag</span>
-      <span class="switch"><input type="checkbox" id="t-half" ${half?'checked':''}><span class="slider"></span></span>
-    </label>
+      <span class="switch ${half?'on':''}" id="t-half-sw"><span class="slider"></span></span>
+    </button>
     <p style="font-size:12px; color:var(--text2); margin:4px 0 14px; line-height:1.5;">
       Urlaub zieht vom Urlaubskonto ab. ZA baut Plusstunden ab. Krank ist nur Dokumentation.
       Für 24.12. und 31.12. „Urlaub“ + „Halber Tag“ wählen.</p>
@@ -741,8 +744,14 @@ function openTypeModal(){
     const map={vac:'on vac',za:'on za',sick:'on sick'};
     b.className=sel?map[sel]:'on work';
   });
+  const halfBtn=document.getElementById('t-half-btn');
+  const halfSw=document.getElementById('t-half-sw');
+  halfBtn.onclick=()=>{
+    half=!half;
+    halfSw.classList.toggle('on', half);
+    halfBtn.setAttribute('aria-pressed', half?'true':'false');
+  };
   document.getElementById('t-save').onclick=()=>{
-    half=document.getElementById('t-half').checked;
     if(!sel) delete DB.dayType[di];
     else DB.dayType[di]={type:sel,half};
     save(); closeModal(); render();

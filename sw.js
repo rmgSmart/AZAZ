@@ -1,4 +1,4 @@
-const CACHE='zeit-v10';
+const CACHE='zeit-v11';
 const ASSETS=['./','./index.html','./manifest.json'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).catch(()=>{}));

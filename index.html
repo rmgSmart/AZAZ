@@ -179,6 +179,12 @@ input,select,textarea{font-family:inherit; font-size:var(--t-body);}
 }
 .act-btn:active{transform:scale(0.95);}
 .act-btn .ti{font-size:19px; color:var(--gold-text);}
+.act-btn-vac{background:rgba(201,162,75,0.26); border-color:rgba(201,162,75,0.55); color:var(--gold-text);}
+.act-btn-vac .ti{color:var(--gold-text);}
+.act-btn-za{background:rgba(124,144,130,0.34); border-color:rgba(124,144,130,0.6); color:#E8F0EA;}
+.act-btn-za .ti{color:#E8F0EA;}
+.act-btn-sick{background:rgba(185,99,78,0.34); border-color:rgba(185,99,78,0.6); color:#FCE1D8;}
+.act-btn-sick .ti{color:#FCE1D8;}
 
 .type-banner{
   border-radius:20px; padding:15px 17px; margin-bottom:13px;
@@ -192,6 +198,8 @@ input,select,textarea{font-family:inherit; font-size:var(--t-body);}
 
 /* WEEK ROWS */
 .wrow{display:flex; justify-content:space-between; align-items:center; padding:15px 6px; border-bottom:1px solid var(--hair); min-height:56px;}
+.wrow-tap{width:100%; text-align:left; background:none; border-left:none; border-right:none; border-top:none;}
+.wrow-tap:active{background:rgba(255,255,255,0.07); border-radius:14px;}
 .wrow:last-child{border-bottom:none;}
 .wrow .d{font-size:var(--t-body); color:var(--text); font-weight:600; display:flex; align-items:center; flex-wrap:wrap; gap:7px;}
 .wrow .d.we{color:var(--text3);}
@@ -318,17 +326,17 @@ input,select,textarea{font-family:inherit; font-size:var(--t-body);}
 .type-choose button.on.sick{background:var(--clay);}
 .half-toggle{
   display:flex; align-items:center; justify-content:space-between;
-  padding:15px 16px; background:rgba(255,255,255,0.07);
+  width:100%; padding:16px; background:rgba(255,255,255,0.07);
   border:1px solid rgba(255,255,255,0.13); border-radius:16px; margin-bottom:14px;
-  cursor:pointer;
+  cursor:pointer; text-align:left; min-height:62px;
 }
-.half-toggle span:first-child{font-size:var(--t-body); color:var(--text); font-weight:500;}
-.switch{position:relative; width:52px; height:31px; flex-shrink:0;}
-.switch input{opacity:0; width:0; height:0;}
-.slider{position:absolute; inset:0; background:rgba(255,255,255,0.18); border-radius:31px; transition:.25s;}
-.slider:before{content:''; position:absolute; height:27px; width:27px; left:2px; bottom:2px; background:#fff; border-radius:50%; transition:.25s; box-shadow:0 2px 5px rgba(0,0,0,0.35);}
-.switch input:checked + .slider{background:var(--gold);}
-.switch input:checked + .slider:before{background:var(--on-gold);}
+.half-toggle:active{background:rgba(255,255,255,0.12);}
+.half-toggle > span:first-child{font-size:var(--t-body); color:var(--text); font-weight:500;}
+.switch{position:relative; width:52px; height:31px; flex-shrink:0; display:block; pointer-events:none;}
+.slider{position:absolute; inset:0; background:rgba(255,255,255,0.18); border-radius:31px; transition:background .22s;}
+.slider:before{content:''; position:absolute; height:27px; width:27px; left:2px; bottom:2px; background:#fff; border-radius:50%; transition:transform .22s, background .22s; box-shadow:0 2px 5px rgba(0,0,0,0.35);}
+.switch.on .slider{background:var(--gold);}
+.switch.on .slider:before{transform:translateX(21px); background:var(--on-gold);}
 .primary{
   width:100%; background:var(--gold); color:var(--on-gold);
   padding:17px; border-radius:20px; font-size:var(--t-body); font-weight:700;
@@ -364,6 +372,6 @@ input,select,textarea{font-family:inherit; font-size:var(--t-body);}
 <div class="toast" id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="app.js?v=1.10.0"></script>
+<script src="app.js?v=1.11.0"></script>
 </body>
 </html>
