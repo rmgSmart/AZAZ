@@ -223,6 +223,44 @@ function render(){
   else if(view==='capture') c.innerHTML=viewCapture();
   else if(view==='admin') c.innerHTML=viewAdmin();
   bindContent();
+  fitCalendar();
+}
+
+/* Kalender ohne Scrollen: Zellgröße an verfügbare Höhe anpassen */
+function fitCalendar(){
+  if(view!=='calendar' || calMode!=='month') return;
+  requestAnimationFrame(()=>{
+    const content=document.getElementById('content');
+    const grid=document.querySelector('.cgrid');
+    const dow=document.querySelector('.dow');
+    const leg=document.querySelector('.legend');
+    if(!content||!grid) return;
+    const avail = content.clientHeight - 96; // Platz für schwebende Tabbar
+    const legH = leg?leg.offsetHeight+10:0;
+    const dowH = dow?dow.offsetHeight+8:0;
+    const rows = Math.ceil(grid.children.length/7);
+    const gap = 6;
+    const cellW = Math.floor((grid.clientWidth - 6*gap)/7);
+    let cellH = Math.floor((avail - legH - dowH - (rows-1)*gap - 12)/rows);
+    // Bei sehr kleinen Displays Legende ausblenden, damit nichts scrollt
+    if(leg && cellH < 38){
+      leg.style.display='none';
+      cellH = Math.floor((avail - dowH - (rows-1)*gap - 12)/rows);
+    } else if(leg){
+      leg.style.display='';
+    }
+    cellH = Math.min(cellH, cellW);
+    cellH = Math.max(cellH, 32);
+    grid.querySelectorAll('.cell').forEach(c=>{
+      c.style.aspectRatio='auto';
+      c.style.height=cellH+'px';
+    });
+    // Schrift skalieren
+    const nSize = Math.max(11, Math.min(17, Math.round(cellH*0.36)));
+    const hSize = Math.max(8, Math.min(11, Math.round(cellH*0.22)));
+    grid.querySelectorAll('.dnum').forEach(e=>e.style.fontSize=nSize+'px');
+    grid.querySelectorAll('.dhrs').forEach(e=>e.style.fontSize=hSize+'px');
+  });
 }
 
 function renderAppbar(){
@@ -236,9 +274,9 @@ function renderAppbar(){
     else if(calMode==='month') title=`${MON_DE[cursor.getMonth()]} ${cursor.getFullYear()}`;
     else title=`${cursor.getFullYear()}`;
     bar.innerHTML=`<div class="navchev">
-        <button data-nav="prev">‹</button>
+        <button class="chevbtn" data-nav="prev"><i class="ti ti-chevron-left"></i></button>
         <span class="title">${title}</span>
-        <button data-nav="next">›</button>
+        <button class="chevbtn" data-nav="next"><i class="ti ti-chevron-right"></i></button>
       </div>
       <div class="seg">
         <button data-cal="week" class="${calMode==='week'?'active':''}">Woche</button>
@@ -247,9 +285,9 @@ function renderAppbar(){
       </div>`;
   } else if(view==='capture'){
     bar.innerHTML=`<div class="navchev">
-        <button data-nav="prev">‹</button>
+        <button class="chevbtn" data-nav="prev"><i class="ti ti-chevron-left"></i></button>
         <span class="title">${captureTitle()}</span>
-        <button data-nav="next">›</button>
+        <button class="chevbtn" data-nav="next"><i class="ti ti-chevron-right"></i></button>
       </div>`;
   } else {
     bar.innerHTML=`<div class="appbar-row"><h1>Verwaltung</h1></div>`;
@@ -405,10 +443,9 @@ function legend(){
     <span><span class="ldot" style="background:var(--ok-bg)"></span>ab 8 h</span>
     <span><span class="ldot" style="background:var(--low-bg)"></span>unter 8 h</span>
     <span><span class="ldot" style="background:var(--gold)"></span>Urlaub</span>
-    <span><span class="ldot" style="background:var(--sage)"></span>Zeitausgleich</span>
+    <span><span class="ldot" style="background:var(--sage)"></span>ZA</span>
     <span><span class="ldot" style="background:var(--clay)"></span>Krank</span>
     <span><span class="ldot" style="background:var(--weekend)"></span>Wochenende</span>
-    <span><span class="ldot" style="background:var(--gold); border-radius:50%"></span>Feiertag</span>
   </div>`;
 }
 
@@ -430,16 +467,15 @@ function viewCapture(){
     timerBox=`<div class="timer-box">
       <div class="timer-display" id="timer-disp">${disp}</div>
       <button class="timer-btn ${running?'stop':'start'}" id="timer-btn">
-        ${running?'Stop':'Start'}</button></div>`;
+        <i class="ti ${running?'ti-player-stop-filled':'ti-player-play-filled'}"></i>${running?'Stop':'Start'}</button></div>`;
   }
 
   let typeBanner='';
   if(dt){
     const names={vac:'Urlaub',za:'Zeitausgleich',sick:'Krank'};
-    const col={vac:'var(--gold)',za:'var(--sage)',sick:'var(--clay)'};
-    typeBanner=`<div class="card" style="border-left:4px solid ${col[dt.type]}; border-radius:0 14px 14px 0; display:flex; justify-content:space-between; align-items:center;">
-      <span style="font-size:14px; color:var(--green); font-weight:600;">${names[dt.type]}${dt.half?' (halber Tag)':''}</span>
-      <button data-cleartype="${di}" style="color:var(--clay); font-size:13px;">entfernen</button></div>`;
+    typeBanner=`<div class="type-banner ${dt.type}">
+      <span>${names[dt.type]}${dt.half?' · halber Tag':''}</span>
+      <button data-cleartype="${di}">Entfernen</button></div>`;
   }
 
   let entriesHtml='';
@@ -459,18 +495,16 @@ function viewCapture(){
   }
 
   const dayH = dayWorkedH(di);
-  const summary = (list.length)?`<div style="text-align:right; font-size:13px; color:var(--textdim); margin:2px 4px 12px;">
-    Tag netto: <b style="color:var(--green)">${fmtH(dayH)}</b>${dayH>PAUSE_THRESHOLD?' <span style="color:var(--muted)">(−30 min Pause)</span>':''}</div>`:'';
+  const summary = (list.length)?`<div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+    <span style="font-size:var(--t-sub); color:var(--text2); font-weight:600;">Tag netto${dayH>PAUSE_THRESHOLD?' <span style="font-weight:500; color:var(--text3)">(−30 min Pause)</span>':''}</span>
+    <span style="font-size:22px; font-weight:700; color:var(--green);">${fmtH(dayH)}</span></div>`:'';
 
   return `
   ${timerBox}
   ${typeBanner}
-  <div style="display:flex; justify-content:space-between; align-items:center; margin:6px 2px 10px;">
-    <span class="sect-label" style="margin:0;">Einträge</span>
-    <div style="display:flex; gap:14px;">
-      <button class="addbtn" id="add-manual"><i class="ti ti-plus"></i> manuell</button>
-      <button class="addbtn" id="set-type" style="color:var(--textdim)"><i class="ti ti-calendar-event"></i> Tagestyp</button>
-    </div>
+  <div class="act-row">
+    <button class="act-btn" id="add-manual"><i class="ti ti-plus"></i>Eintrag</button>
+    <button class="act-btn" id="set-type"><i class="ti ti-calendar-event"></i>Tagestyp</button>
   </div>
   ${entriesHtml}
   ${summary}`;
@@ -490,18 +524,18 @@ function viewAdmin(){
   return `
   <div class="sect-label">Daten</div>
   <div class="mlist">
-    <button class="mitem" id="import-btn"><i class="ti ti-upload"></i>Excel importieren<i class="ti ti-chevron-right chev"></i></button>
-    <button class="mitem" id="export-btn"><i class="ti ti-download"></i>CSV exportieren<i class="ti ti-chevron-right chev"></i></button>
+    <button class="mitem" id="import-btn"><span class="ic"><i class="ti ti-file-spreadsheet"></i></span>Excel importieren<i class="ti ti-chevron-right chev"></i></button>
+    <button class="mitem" id="export-btn"><span class="ic"><i class="ti ti-download"></i></span>CSV exportieren<i class="ti ti-chevron-right chev"></i></button>
   </div>
   <div class="sect-label">Urlaub &amp; Abwesenheit</div>
   <div class="mlist">
-    <button class="mitem" id="vac-setup"><i class="ti ti-beach"></i>Urlaubskonto<span class="rgt">${vacTxt}</span></button>
-    <button class="mitem" id="holidays-btn"><i class="ti ti-calendar-event"></i>Feiertage<i class="ti ti-chevron-right chev"></i></button>
+    <button class="mitem" id="vac-setup"><span class="ic"><i class="ti ti-beach"></i></span>Urlaubskonto<span class="rgt">${vacTxt}</span></button>
+    <button class="mitem" id="holidays-btn"><span class="ic"><i class="ti ti-calendar-star"></i></span>Feiertage<i class="ti ti-chevron-right chev"></i></button>
   </div>
   <div class="sect-label">Einstellungen</div>
   <div class="mlist">
-    <button class="mitem" id="rules-btn"><i class="ti ti-adjustments"></i>Soll &amp; Pause<i class="ti ti-chevron-right chev"></i></button>
-    <button class="mitem" id="about-btn"><i class="ti ti-info-circle"></i>Über die App<i class="ti ti-chevron-right chev"></i></button>
+    <button class="mitem" id="rules-btn"><span class="ic"><i class="ti ti-adjustments"></i></span>Soll &amp; Pause<i class="ti ti-chevron-right chev"></i></button>
+    <button class="mitem" id="about-btn"><span class="ic"><i class="ti ti-info-circle"></i></span>Über die App<i class="ti ti-chevron-right chev"></i></button>
   </div>
   <input type="file" id="file-input" accept=".xlsx,.xls" class="hidden">`;
 }
@@ -564,7 +598,7 @@ function updateTimerDisp(){
 
 /* ---------- Modal Framework ---------- */
 function openModal(html){
-  document.getElementById('modal-root').innerHTML=`<div class="modal-back" id="mback"><div class="modal">${html}</div></div>`;
+  document.getElementById('modal-root').innerHTML=`<div class="modal-back" id="mback"><div class="modal"><div class="grabber"></div>${html}</div></div>`;
   document.getElementById('mback').onclick=(e)=>{ if(e.target.id==='mback') closeModal(); };
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);
 }
@@ -619,14 +653,16 @@ function openTypeModal(){
   openModal(`
     <h2>Tagestyp · ${pad(cursor.getDate())}.${pad(cursor.getMonth()+1)}.<button class="x" data-close>&times;</button></h2>
     <div class="type-choose" id="tc">
-      <button data-t="work" class="${!sel?'on work':''}">Arbeit</button>
+      <button data-t="work" class="${!sel?'on work':''}">Arbeitstag</button>
       <button data-t="vac" class="${sel==='vac'?'on vac':''}">Urlaub</button>
-      <button data-t="za" class="${sel==='za'?'on za':''}">ZA</button>
+      <button data-t="za" class="${sel==='za'?'on za':''}">Zeitausgleich</button>
       <button data-t="sick" class="${sel==='sick'?'on sick':''}">Krank</button>
     </div>
-    <div class="half-toggle"><input type="checkbox" id="t-half" ${half?'checked':''}>
-      <label for="t-half">Halber Tag (½)</label></div>
-    <p style="font-size:12px; color:var(--textdim); margin:4px 0 14px; line-height:1.5;">
+    <div class="half-toggle">
+      <label for="t-half">Halber Tag</label>
+      <span class="switch"><input type="checkbox" id="t-half" ${half?'checked':''}><span class="slider"></span></span>
+    </div>
+    <p style="font-size:12px; color:var(--text2); margin:4px 0 14px; line-height:1.5;">
       Urlaub zieht vom Urlaubskonto ab. ZA baut Plusstunden ab. Krank ist nur Dokumentation.
       Für 24.12. und 31.12. „Urlaub“ + „Halber Tag“ wählen.</p>
     <button class="primary" id="t-save">Speichern</button>
@@ -650,7 +686,7 @@ function openVacModal(){
   const s=DB.settings;
   openModal(`
     <h2>Urlaubskonto einrichten<button class="x" data-close>&times;</button></h2>
-    <p style="font-size:13px; color:var(--textdim); margin-bottom:14px; line-height:1.55;">
+    <p style="font-size:13px; color:var(--text2); margin-bottom:14px; line-height:1.55;">
       Gib den Reststand zum Jahresende deines Eintrittsjahres ein. Ab dann rechnet die App
       jeden 1.1. +25 Tage dazu (kein Verfall) und zieht deine Urlaubstage ab.</p>
     <div class="field"><label>Eintrittsjahr</label><input type="number" id="v-year" value="${s.startYear||2025}"></div>
@@ -672,10 +708,10 @@ function openHolidaysModal(){
   const y=cursor.getFullYear();
   const hs=Object.entries(holidays(y)).sort((a,b)=>a[0].localeCompare(b[0]));
   const rows=hs.map(([di,n])=>{const d=parseISO(di);
-    return `<div class="wrow"><div class="d">${DOW_DE[(d.getDay()+6)%7]}, ${pad(d.getDate())}. ${MON_SHORT[d.getMonth()]}</div><div class="h" style="font-weight:400; font-size:13px; color:var(--textdim)">${n}</div></div>`;}).join('');
+    return `<div class="wrow"><div class="d">${DOW_DE[(d.getDay()+6)%7]}, ${pad(d.getDate())}. ${MON_SHORT[d.getMonth()]}</div><div class="h" style="font-weight:400; font-size:13px; color:var(--text2)">${n}</div></div>`;}).join('');
   openModal(`<h2>Feiertage ${y}<button class="x" data-close>&times;</button></h2>
     <div class="card" style="padding:2px 12px;">${rows}</div>
-    <p style="font-size:12px;color:var(--textdim);margin-top:10px;">Gesetzliche Feiertage in Österreich. Fällt einer auf Mo–Fr, ist das Tagessoll 0.</p>`);
+    <p style="font-size:12px;color:var(--text2);margin-top:10px;">Gesetzliche Feiertage in Österreich. Fällt einer auf Mo–Fr, ist das Tagessoll 0.</p>`);
 }
 
 /* ---------- Regeln ---------- */
@@ -689,7 +725,7 @@ function openRulesModal(){
       <div>ZA: baut Plusstunden ab</div>
       <div>Krank: nur Dokumentation</div>
     </div>
-    <p style="font-size:12px;color:var(--textdim);margin-top:10px;">Diese Regeln sind fix hinterlegt. Melde dich, wenn etwas angepasst werden soll.</p>`);
+    <p style="font-size:12px;color:var(--text2);margin-top:10px;">Diese Regeln sind fix hinterlegt. Melde dich, wenn etwas angepasst werden soll.</p>`);
 }
 function openAboutModal(){
   openModal(`<h2>Über die App<button class="x" data-close>&times;</button></h2>
